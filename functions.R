@@ -9,6 +9,7 @@ Kp <- function(Temp, MW, pvap, accoeff) {
 }
 
 to_minimise_M <- function(M, Kp, Tmass ){
+  return(abs(1-sum(Kp*Tmass/(1+Kp*M))))
   
 }
 prod_df <- tibble::tibble(
@@ -25,15 +26,19 @@ mseed <- 10
 delta_misoprene <- 1
 Temp <- 298
 
+reltol <- 0.01
+
 Figuess <- 0.1
-prod_df <- prod_df %>%
+old_prod_df <- prod_df %>%
   mutate(
     totalmass = yield*delta_misoprene,
     Fi = Figuess)
 
+final_df <- old_prod_df
+
 convergence <- FALSE
-# while(!convergence){
-  SOA <- prod_df %>%
+while(!convergence){
+  SOA <- old_prod_df %>%
     mutate(aermass = totalmass*Fi) %>%
     
     summarise(MSOA = sum(aermass),
@@ -41,10 +46,25 @@ convergence <- FALSE
     )
   
   MW <- meanMW(MWseed, mseed, SOA$MWsoa, SOA$MSOA)
-  prod_df <- prod_df %>%
+  old_prod_df <- old_prod_df %>%
     mutate(Kp = Kp(Temp, MW, pvap, accoeff))
   
   
-  M_before <- SOA$MSOA + mseed
-  optim(M_before)
-# }
+  M_before <- SOA$MSOA
+  
+  M <- (optimize(f = to_minimise_M, interval = c(0,mseed*2), Kp = old_prod_df$Kp, Tmass = old_prod_df$totalmass))$minimum
+  
+  Mtot <- M + mseed
+  print(abs(M-M_before)/M_before)
+  if(abs(M-M_before)/M_before <= reltol) {
+    convergence <- TRUE
+  }
+  new_prod_df <- old_prod_df %>%
+    mutate(
+      iter = iter+1,
+      Fi = Kp*Mtot*totalmass/(1+Kp*Mtot))
+  
+  final_df <- bind_rows(final_df, new_prod_df)
+  
+  old_prod_df <- new_prod_df
+}
